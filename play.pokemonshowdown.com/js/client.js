@@ -700,9 +700,9 @@ function toId() {
 			});
 
 			// get coil values too
-			$.get('/config/coil.json?' + Math.random(), {}, function (data) {
-				Object.assign(LadderRoom.COIL_B, data);
-			});
+			// $.get('/config/coil.json?' + Math.random(), {}, function (data) {
+			// 	Object.assign(LadderRoom.COIL_B, data);
+			// });
 
 			this.initializeConnection();
 		},
