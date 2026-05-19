@@ -18,7 +18,7 @@ npm-debug.log
 /play.pokemonshowdown.com/index-test.html
 /play.pokemonshowdown.com/preactalpha.html
 /play.pokemonshowdown.com/crossprotocol.html
-/play.pokemonshowdown.com/data/
+/play.pokemonshowdown.com/data/*
 !/play.pokemonshowdown.com/data/pokedex-mini.js
 !/play.pokemonshowdown.com/data/pokedex-mini-bw.js
 
