@@ -577,17 +577,29 @@ Storage.initTestClient = function () {
 };
 
 Storage.initParentStorageProxy = function () {
-	var responded = false;
+	// Install save overrides immediately — every team/pref save proxies through the
+	// parent page's first-party localStorage regardless of whether the parent responds
+	// to the init request below. The parent stores them as ps_showdown_teams /
+	// ps_showdown_prefs; the local write is a cache in case the parent is unavailable.
+	Storage.saveTeams = function () {
+		var packed = Storage.packAllTeams(Storage.teams);
+		window.parent.postMessage({ type: 'PS_STORAGE_SET', key: 'showdown_teams', value: packed }, '*');
+		try { localStorage.setItem('showdown_teams', packed); } catch (ex) {}
+	};
+	Storage.prefs.save = function () {
+		var prefData = JSON.stringify(this.data);
+		window.parent.postMessage({ type: 'PS_STORAGE_SET', key: 'showdown_prefs', value: prefData }, '*');
+		try { localStorage.setItem('showdown_prefs', prefData); } catch (ex) {}
+	};
+
+	// Request stored data from the parent page so we can load existing teams.
+	// Fall back to the local cache if the parent does not respond in time.
 	var timeout = setTimeout(function () {
-		if (!responded) {
-			// Parent did not respond in time; fall back to whatever is in iframe localStorage
-			Storage.whenTeamsLoaded.load();
-		}
+		Storage.whenTeamsLoaded.load();
 	}, 2000);
 
 	window.addEventListener('message', function onParentData(e) {
 		if (!e.data || e.data.type !== 'PS_STORAGE_DATA') return;
-		responded = true;
 		clearTimeout(timeout);
 		window.removeEventListener('message', onParentData);
 
@@ -602,22 +614,6 @@ Storage.initParentStorageProxy = function () {
 
 		// Load teams from parent; fall back to local cache if parent has nothing yet
 		Storage.loadPackedTeams(data.showdown_teams || localStorage.getItem('showdown_teams'));
-
-		// Override saveTeams to persist in the parent page's first-party localStorage
-		Storage.saveTeams = function () {
-			var packed = Storage.packAllTeams(Storage.teams);
-			window.parent.postMessage({ type: 'PS_STORAGE_SET', key: 'showdown_teams', value: packed }, '*');
-			// Mirror locally as a cache in case parent is unavailable
-			try { localStorage.setItem('showdown_teams', packed); } catch (ex) {}
-		};
-
-		// Override prefs.save to persist in the parent page's first-party localStorage
-		Storage.prefs.save = function () {
-			var prefData = JSON.stringify(this.data);
-			window.parent.postMessage({ type: 'PS_STORAGE_SET', key: 'showdown_prefs', value: prefData }, '*');
-			try { localStorage.setItem('showdown_prefs', prefData); } catch (ex) {}
-		};
-
 		Storage.whenTeamsLoaded.load();
 	});
 
