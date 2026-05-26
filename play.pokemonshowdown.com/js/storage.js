@@ -350,12 +350,7 @@ Storage.initPrefs = function () {
 		Config.server = Config.server || Config.defaultserver;
 		this.whenPrefsLoaded.load();
 		if (!window.nodewebkit) {
-			if (window !== window.parent) {
-				// Embedded in an iframe: proxy storage through the parent page
-				Storage.initParentStorageProxy();
-			} else {
-				this.whenTeamsLoaded.load();
-			}
+			Storage.initParentStorageProxy();
 		}
 		return;
 	}
