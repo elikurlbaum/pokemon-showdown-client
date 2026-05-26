@@ -345,6 +345,19 @@ Storage.initPrefs = function () {
 		this.whenPrefsLoaded.load();
 		if (!window.nodewebkit) this.whenTeamsLoaded.load();
 		return;
+	} else if (document.location.hostname !== Config.routes.client) {
+		// Custom self-hosted client
+		Config.server = Config.server || Config.defaultserver;
+		this.whenPrefsLoaded.load();
+		if (!window.nodewebkit) {
+			if (window !== window.parent) {
+				// Embedded in an iframe: proxy storage through the parent page
+				Storage.initParentStorageProxy();
+			} else {
+				this.whenTeamsLoaded.load();
+			}
+		}
+		return;
 	}
 
 	// Cross-origin
@@ -561,6 +574,55 @@ Storage.initTestClient = function () {
 		};
 		Storage.whenPrefsLoaded.load();
 	});
+};
+
+Storage.initParentStorageProxy = function () {
+	var responded = false;
+	var timeout = setTimeout(function () {
+		if (!responded) {
+			// Parent did not respond in time; fall back to whatever is in iframe localStorage
+			Storage.whenTeamsLoaded.load();
+		}
+	}, 2000);
+
+	window.addEventListener('message', function onParentData(e) {
+		if (!e.data || e.data.type !== 'PS_STORAGE_DATA') return;
+		responded = true;
+		clearTimeout(timeout);
+		window.removeEventListener('message', onParentData);
+
+		var data = e.data.data || {};
+
+		// Load prefs from parent if available
+		if (data.showdown_prefs) {
+			try {
+				Storage.prefs.data = JSON.parse(data.showdown_prefs) || {};
+			} catch (ex) {}
+		}
+
+		// Load teams from parent; fall back to local cache if parent has nothing yet
+		Storage.loadPackedTeams(data.showdown_teams || localStorage.getItem('showdown_teams'));
+
+		// Override saveTeams to persist in the parent page's first-party localStorage
+		Storage.saveTeams = function () {
+			var packed = Storage.packAllTeams(Storage.teams);
+			window.parent.postMessage({ type: 'PS_STORAGE_SET', key: 'showdown_teams', value: packed }, '*');
+			// Mirror locally as a cache in case parent is unavailable
+			try { localStorage.setItem('showdown_teams', packed); } catch (ex) {}
+		};
+
+		// Override prefs.save to persist in the parent page's first-party localStorage
+		Storage.prefs.save = function () {
+			var prefData = JSON.stringify(this.data);
+			window.parent.postMessage({ type: 'PS_STORAGE_SET', key: 'showdown_prefs', value: prefData }, '*');
+			try { localStorage.setItem('showdown_prefs', prefData); } catch (ex) {}
+		};
+
+		Storage.whenTeamsLoaded.load();
+	});
+
+	// Request stored data from the parent page
+	window.parent.postMessage({ type: 'PS_STORAGE_INIT' }, '*');
 };
 
 /*********************************************************
