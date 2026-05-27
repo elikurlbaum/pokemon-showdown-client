@@ -1,6 +1,16 @@
 function Storage() {}
 
+Storage.parentTeamsRequestType = 'pslab-showdown-teams-request';
+Storage.parentTeamsResponseType = 'pslab-showdown-teams-response';
+Storage.parentTeamsUpdateType = 'pslab-showdown-teams-update';
+Storage.parentMessageListenerInstalled = false;
+
 Storage.initialize = function () {
+	if (!Storage.parentMessageListenerInstalled && window.addEventListener) {
+		window.addEventListener('message', Storage.onParentMessage, false);
+		Storage.parentMessageListenerInstalled = true;
+	}
+
 	if (window.nodewebkit) {
 		window.fs = require('fs');
 
@@ -10,6 +20,36 @@ Storage.initialize = function () {
 		this.logChat = this.nwLogChat;
 	}
 	Storage.initPrefs();
+};
+
+Storage.requestParentTeams = function () {
+	if (!window.parent || window.parent === window) return;
+	try {
+		window.parent.postMessage({ type: Storage.parentTeamsRequestType }, '*');
+	} catch (e) {}
+};
+
+Storage.pushParentTeams = function (packedTeams) {
+	if (!window.parent || window.parent === window) return;
+	try {
+		window.parent.postMessage({
+			type: Storage.parentTeamsUpdateType,
+			packedTeams: packedTeams || '',
+		}, '*');
+	} catch (e) {}
+};
+
+Storage.onParentMessage = function (e) {
+	if (!e || e.source !== window.parent) return;
+	var data = e.data;
+	if (!data || typeof data !== 'object') return;
+	if (data.type !== Storage.parentTeamsResponseType) return;
+	if (typeof data.packedTeams !== 'string') return;
+
+	Storage.loadPackedTeams(data.packedTeams);
+	if (Storage.whenTeamsLoaded.isLoaded) {
+		Storage.whenTeamsLoaded.update();
+	}
 };
 
 Storage.safeJSON = function (callback) {
@@ -345,14 +385,6 @@ Storage.initPrefs = function () {
 		this.whenPrefsLoaded.load();
 		if (!window.nodewebkit) this.whenTeamsLoaded.load();
 		return;
-	} else if (document.location.hostname !== Config.routes.client) {
-		// Custom self-hosted client
-		Config.server = Config.server || Config.defaultserver;
-		this.whenPrefsLoaded.load();
-		if (!window.nodewebkit) {
-			Storage.initParentStorageProxy();
-		}
-		return;
 	}
 
 	// Cross-origin
@@ -438,6 +470,7 @@ Storage.onMessage = function ($e) {
 		Storage.saveTeams = function () {
 			var packedTeams = Storage.packAllTeams(Storage.teams);
 			Storage.postCrossOriginMessage('T' + packedTeams);
+			Storage.pushParentTeams(packedTeams);
 
 			// in Safari, cross-origin local storage is apparently treated as session
 			// storage, so mirror the storage in the current origin just in case
@@ -571,51 +604,6 @@ Storage.initTestClient = function () {
 	});
 };
 
-Storage.initParentStorageProxy = function () {
-	// Install save overrides immediately — every team/pref save proxies through the
-	// parent page's first-party localStorage regardless of whether the parent responds
-	// to the init request below. The parent stores them as ps_showdown_teams /
-	// ps_showdown_prefs; the local write is a cache in case the parent is unavailable.
-	Storage.saveTeams = function () {
-		var packed = Storage.packAllTeams(Storage.teams);
-		window.parent.postMessage({ type: 'PS_STORAGE_SET', key: 'showdown_teams', value: packed }, '*');
-		try { localStorage.setItem('showdown_teams', packed); } catch (ex) {}
-	};
-	Storage.prefs.save = function () {
-		var prefData = JSON.stringify(this.data);
-		window.parent.postMessage({ type: 'PS_STORAGE_SET', key: 'showdown_prefs', value: prefData }, '*');
-		try { localStorage.setItem('showdown_prefs', prefData); } catch (ex) {}
-	};
-
-	// Request stored data from the parent page so we can load existing teams.
-	// Fall back to the local cache if the parent does not respond in time.
-	var timeout = setTimeout(function () {
-		Storage.whenTeamsLoaded.load();
-	}, 2000);
-
-	window.addEventListener('message', function onParentData(e) {
-		if (!e.data || e.data.type !== 'PS_STORAGE_DATA') return;
-		clearTimeout(timeout);
-		window.removeEventListener('message', onParentData);
-
-		var data = e.data.data || {};
-
-		// Load prefs from parent if available
-		if (data.showdown_prefs) {
-			try {
-				Storage.prefs.data = JSON.parse(data.showdown_prefs) || {};
-			} catch (ex) {}
-		}
-
-		// Load teams from parent; fall back to local cache if parent has nothing yet
-		Storage.loadPackedTeams(data.showdown_teams || localStorage.getItem('showdown_teams'));
-		Storage.whenTeamsLoaded.load();
-	});
-
-	// Request stored data from the parent page
-	window.parent.postMessage({ type: 'PS_STORAGE_INIT' }, '*');
-};
-
 /*********************************************************
  * Teams
  *********************************************************/
@@ -638,6 +626,7 @@ Storage.loadTeams = function () {
 			Storage.loadPackedTeams(localStorage.getItem('showdown_teams'));
 		}
 	} catch (e) {}
+	Storage.requestParentTeams();
 };
 
 /** returns false to add the team, true to not add it, 'rename' to add it under a diff name */
@@ -725,9 +714,10 @@ Storage.loadPackedTeams = function (buffer) {
 };
 
 Storage.saveTeams = function () {
+	var packedTeams = Storage.packAllTeams(this.teams);
 	try {
 		if (window.localStorage) {
-			localStorage.setItem('showdown_teams', Storage.packAllTeams(this.teams));
+			localStorage.setItem('showdown_teams', packedTeams);
 			Storage.cantSave = false;
 		}
 	} catch (e) {
@@ -737,6 +727,7 @@ Storage.saveTeams = function () {
 			throw e;
 		}
 	}
+	Storage.pushParentTeams(packedTeams);
 };
 
 Storage.getPackedTeams = function () {
